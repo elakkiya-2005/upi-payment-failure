@@ -1,0 +1,7 @@
+/* This file is kept for compatibility.
+   Global styles now live in src/styles/global.css,
+   component styles in src/styles/components.css and
+   layout/page styles in src/styles/pages.css.
+   All three are imported in index.js. */
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap");

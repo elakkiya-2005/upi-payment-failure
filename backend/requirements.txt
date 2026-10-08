@@ -1,0 +1,37 @@
+# Python dependencies for the ml/ analyzers and training scripts.
+#
+# Install with:
+#   pip install -r requirements.txt
+#
+# The Node server shells out to these scripts, so anything listed here is
+# needed at runtime for risk analysis, anomaly detection and the dataset
+# analyzer to work at all.
+
+# Data handling
+pandas==2.3.3
+numpy==2.3.4
+scipy==1.16.3
+
+# Models. scikit-learn covers the Random Forest, KNN and Isolation Forest;
+# imbalanced-learn provides the sampling used while training the Random
+# Forest, which would otherwise predict almost everything as successful.
+scikit-learn==1.7.2
+imbalanced-learn==0.14.2
+xgboost==3.4.1
+joblib==1.5.2
+
+# Spreadsheet reading for the dataset analyzer.
+# openpyxl reads .xlsx, xlrd reads the legacy .xls format. xlrd 2.x only
+# reads .xls on purpose, so both are needed to honour the file types the
+# upload box advertises.
+openpyxl==3.1.5
+xlrd==2.0.2
+
+# Database access. Every script in ml/ connects through SQLAlchemy using
+# the PyMySQL driver, so PyMySQL is the required one rather than the
+# Oracle connector.
+SQLAlchemy==2.0.52
+PyMySQL==1.2.0
+
+# Configuration
+python-dotenv==1.2.3
