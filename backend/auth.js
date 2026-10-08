@@ -2,11 +2,20 @@
 //
 // The risk history feature needs the backend to know who is calling, so
 // identity is decided here and never taken from the request body. Passwords
-// are hashed with scrypt and the session token is HMAC signed using only
-// Node's built-in crypto, so no extra packages are required.
+// are hashed with bcrypt and the session token is HMAC signed.
 
 const crypto = require("crypto");
 const db = require("./db");
+
+// Prefer the native bcrypt module when it is installed; bcryptjs is the
+// pure-JS drop-in with the same $2b$ hashes and the same hash/compare API,
+// so accounts stay interchangeable between the two.
+let bcrypt;
+try {
+    bcrypt = require("bcrypt");
+} catch {
+    bcrypt = require("bcryptjs");
+}
 
 const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -20,31 +29,48 @@ const base64url = (buffer) =>
 
 
 // -------------------------------------------
-// PASSWORD HASHING
+// PASSWORD HASHING (bcrypt)
 // -------------------------------------------
 
-function hashPassword(password) {
+async function hashPassword(password) {
+    const hash = await bcrypt.hash(String(password), 10);
+
+    // bcrypt carries its own salt inside the hash; the salt column is kept
+    // populated because the schema marks it NOT NULL and legacy scrypt rows
+    // still read it.
     const salt = crypto.randomBytes(16).toString("hex");
 
-    const derived = crypto
-        .scryptSync(String(password), salt, 64)
-        .toString("hex");
-
-    return { salt, hash: derived };
+    return { salt, hash };
 }
 
 
-function verifyPassword(password, salt, expectedHash) {
-    if (!salt || !expectedHash) return false;
+async function verifyPassword(password, salt, expectedHash) {
+    if (!expectedHash) return false;
 
-    const derived = crypto
-        .scryptSync(String(password), salt, 64);
+    // bcrypt rows ($2a$/$2b$/$2y$) are verified with bcrypt.compare.
+    if (expectedHash.startsWith("$2")) {
+        try {
+            return await bcrypt.compare(String(password), expectedHash);
+        } catch {
+            return false;
+        }
+    }
 
-    const expected = Buffer.from(expectedHash, "hex");
+    // Legacy rows were hashed with scrypt before bcrypt was introduced.
+    if (!salt) return false;
 
-    if (derived.length !== expected.length) return false;
+    try {
+        const derived = crypto
+            .scryptSync(String(password), salt, 64);
 
-    return crypto.timingSafeEqual(derived, expected);
+        const expected = Buffer.from(expectedHash, "hex");
+
+        if (derived.length !== expected.length) return false;
+
+        return crypto.timingSafeEqual(derived, expected);
+    } catch {
+        return false;
+    }
 }
 
 

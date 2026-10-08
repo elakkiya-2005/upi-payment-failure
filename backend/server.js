@@ -41,6 +41,18 @@ app.post(
 app.use(express.json());
 
 
+// TEMPORARY DEBUG: makes a failed login attempt explain itself in the
+// backend console. Remove these two lines once the issue is resolved.
+console.log(
+    "[STARTUP DEBUG] AUTH_SECRET set:",
+    Boolean(process.env.AUTH_SECRET),
+    "| ADMIN_EMAILS:",
+    process.env.ADMIN_EMAILS || "(not set)",
+    "| PORT:",
+    process.env.PORT || 5000
+);
+
+
 // ==========================================
 // CREATE AUTH + RISK HISTORY TABLES
 // ==========================================
@@ -83,7 +95,7 @@ const publicUser = (user) => ({
 });
 
 
-app.post("/api/auth/register", (req, res) => {
+app.post("/api/auth/register", async (req, res) => {
 
     const name = String(req.body.name || "").trim();
 
@@ -124,7 +136,7 @@ app.post("/api/auth/register", (req, res) => {
     db.query(
         "SELECT id FROM users WHERE email = ? LIMIT 1",
         [email],
-        (existingError, existingRows) => {
+        async (existingError, existingRows) => {
 
             if (existingError) {
 
@@ -143,7 +155,19 @@ app.post("/api/auth/register", (req, res) => {
             }
 
 
-            const { salt, hash } = auth.hashPassword(password);
+            let hashed;
+
+            try {
+                hashed = await auth.hashPassword(password);
+            } catch (hashError) {
+                console.error("Register hashing failed:", hashError);
+
+                return res.status(500).json({
+                    error: "Could not create the account."
+                });
+            }
+
+            const { salt, hash } = hashed;
 
             const role = auth.roleForEmail(email);
 
@@ -185,7 +209,12 @@ app.post("/api/auth/register", (req, res) => {
 });
 
 
-app.post("/api/auth/login", (req, res) => {
+// TEMPORARY DEBUG: every failure path below logs the exact reason with a
+// [LOGIN DEBUG] prefix so a failed attempt is explainable from the console.
+// Remove the console.log lines once the login problem is resolved.
+app.post("/api/auth/login", async (req, res) => {
+
+    const rawEmail = req.body ? req.body.email : undefined;
 
     const email = String(req.body.email || "")
         .trim()
@@ -194,12 +223,29 @@ app.post("/api/auth/login", (req, res) => {
     const password = String(req.body.password || "");
 
 
+    console.log(
+        "[LOGIN DEBUG] fields received:",
+        Object.keys(req.body || {}),
+        "| raw email:",
+        JSON.stringify(rawEmail),
+        "-> normalized:",
+        JSON.stringify(email),
+        "| password length:",
+        password.length
+    );
+
+
     db.query(
         "SELECT * FROM users WHERE email = ? LIMIT 1",
         [email],
-        (err, rows) => {
+        async (err, rows) => {
 
             if (err) {
+
+                console.log(
+                    "[LOGIN DEBUG] FAILURE REASON: database query failed ->",
+                    err.message
+                );
 
                 console.error("Login failed:", err);
 
@@ -217,21 +263,54 @@ app.post("/api/auth/login", (req, res) => {
 
             if (!rows || rows.length === 0) {
 
+                console.log(
+                    "[LOGIN DEBUG] FAILURE REASON: no user row matches",
+                    JSON.stringify(email)
+                );
+
                 return res.status(401).json(invalid);
 
             }
 
             const account = rows[0];
 
-            if (!auth.verifyPassword(
+            const hashFormat = String(account.password_hash || "")
+                .startsWith("$2")
+                ? "bcrypt"
+                : "scrypt(legacy)";
+
+            console.log(
+                "[LOGIN DEBUG] row found: id=" + account.id,
+                "role=" + account.role,
+                "hash=" + hashFormat,
+                "| salt present:",
+                Boolean(account.salt)
+            );
+
+            const matches = await auth.verifyPassword(
                 password,
                 account.salt,
                 account.password_hash
-            )) {
+            );
+
+            console.log(
+                "[LOGIN DEBUG] password compare:",
+                matches
+                    ? "MATCH"
+                    : "MISMATCH - the supplied password does not match the stored hash"
+            );
+
+            if (!matches) {
 
                 return res.status(401).json(invalid);
 
             }
+
+            console.log(
+                "[LOGIN DEBUG] SUCCESS: issuing token for",
+                account.email,
+                "| role=" + account.role
+            );
 
             res.json({
                 user: publicUser(account),
